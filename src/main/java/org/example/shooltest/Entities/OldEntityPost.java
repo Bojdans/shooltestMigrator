@@ -3,6 +3,7 @@ package org.example.shooltest.Entities;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -63,6 +64,10 @@ public class OldEntityPost {
 
     @Column(name = "post_content_filtered", columnDefinition = "TEXT")
     private String postContentFiltered;
+
+    @Column(name = "post_content", columnDefinition = "TEXT")
+    @ToString.Exclude
+    private String postContent;
 
     @Column(name = "post_parent", nullable = false)
     private Long postParent;

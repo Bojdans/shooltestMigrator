@@ -10,8 +10,6 @@ import java.util.List;
 
 @Repository
 public interface OldEntityPostRepository extends JpaRepository<OldEntityPost, Long> {
-    @Query("SELECT e FROM OldEntityPost e " +
-            "WHERE CAST(e.postTitle AS string) LIKE CONCAT('%', :text, '%') "
-    )
-    List<OldEntityPost> findAllByPostTitle(@Param("text") String text);
+    @Query("SELECT o FROM OldEntityPost o WHERE LOWER(o.postTitle) LIKE LOWER(CONCAT('%', :title, '%'))")
+    List<OldEntityPost> findByPostTitleContainingIgnoreCase(@Param("title") String title);
 }

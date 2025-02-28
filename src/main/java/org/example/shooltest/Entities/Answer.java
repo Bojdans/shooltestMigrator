@@ -14,7 +14,7 @@ public class Answer {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(nullable = false,length = 2000)
     private String answerText;
 
     @Column(nullable = false)
@@ -22,5 +22,11 @@ public class Answer {
 
     @ManyToOne
     @JoinColumn(name = "question_id", nullable = false)
+    @ToString.Exclude
     private Question question;
+
+    public Answer(String answerText, boolean isCorrect) {
+        this.answerText = answerText;
+        this.isCorrect = isCorrect;
+    }
 }

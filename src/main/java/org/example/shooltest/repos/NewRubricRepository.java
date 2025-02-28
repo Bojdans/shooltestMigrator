@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface NewRubricRepository extends JpaRepository<NewRubric, Long> {
-    NewRubric findByNameContaining(String name);
+    NewRubric findByName(String name);
 }

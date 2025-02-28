@@ -1,22 +1,24 @@
 package org.example.shooltest.Migration;
 
-import org.example.shooltest.Entities.NewRubric;
-import org.example.shooltest.Entities.OldEntityPost;
-import org.example.shooltest.Entities.OldRubric;
+import org.example.shooltest.Entities.*;
 import org.example.shooltest.repos.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class PostMigrator implements ApplicationListener<ApplicationReadyEvent> {
     private static final Map<String, String> rubricMapping = new HashMap<>();
     private static final Map<OldRubric, NewRubric> newRubricMapping = new HashMap<>();
+    private int counter = 0;
     @Autowired
     private AnswerRepository answerRepository;
     @Autowired
@@ -82,22 +84,210 @@ public class PostMigrator implements ApplicationListener<ApplicationReadyEvent> 
         rubricMapping.put("Чертежи", "Начертательная геометрия");
         rubricMapping.put("Обществознание", "Политология");
         rubricMapping.put("Окружающий мир", "Экология");
-        rubricMapping.put("Другое", "Другое");
-        rubricMapping.put("Разное", "Разное");
+        rubricMapping.put("Разное", "Другое");
     }
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        List<OldEntityPost> oldTests = oldEntityPostRepository.findAllByPostTitle("Тест");
-        oldTests.addAll(oldEntityPostRepository.findAllByPostTitle("тест"));
-        System.out.println("==============тесты===============");
-        System.out.println(oldTests);
-        System.out.println("==================================");
-        oldRubricRepository.findAll().forEach(oldRubric -> System.out.println(getNewRubric(oldRubric)));
+        List<OldEntityPost> oldTests = oldEntityPostRepository.findByPostTitleContainingIgnoreCase("Тест");
+        System.out.println(oldTests.size());
+        List<ShooltestTest> newTests = new ArrayList<>();
+
+
+        oldTests.forEach(oldTest -> {
+            ShooltestTest newTest = getShooltestTest(oldTest);
+            newTests.add(newTest);
+            newTest.getQuestions().forEach(question -> System.out.println(question.getAnswers()));
+        });
+        printAllTests(newTests);
+        System.out.println(newTests);
+        System.out.println("Не выполнены преобразования: ");
+        newTests.stream()
+                .filter(newTest -> newTest.getQuestions().isEmpty())
+                .map(newTest -> newTest.getOldEntityPost().getPostContent())
+                .toList()
+                .forEach(newTest -> {
+                    System.out.println("----------------------Тест------------------------");
+                    System.out.println(newTest);
+                });
+        System.out.println(newTests.stream().filter(newTest -> !newTest.getQuestions().isEmpty()).toList().size() + "/" + oldTests.size());
+        shooltestTestRepository.saveAll(newTests);
+        System.out.println("Сохранено!");
     }
 
     public NewRubric getNewRubric(OldRubric oldRubric) {
-        System.out.println(oldRubric);
-        return newRubricRepository.findByNameContaining(rubricMapping.getOrDefault(oldRubric.getName(),"Другое"));
+        if (oldRubric == null) return newRubricRepository.findByName("Другое");
+        NewRubric newRubric = newRubricRepository.findByName(rubricMapping.getOrDefault(oldRubric.getName(), "Другое"));
+        return newRubric != null ? newRubric : newRubricRepository.findByName("Другое");
     }
+
+    public ShooltestTest getShooltestTest(OldEntityPost oldEntityPost) {
+        ShooltestTest shooltestTest = new ShooltestTest();
+
+
+        shooltestTest.setName(oldEntityPost.getPostTitle());
+
+
+        shooltestTest.setRubric(getNewRubric(oldEntityPost.getTerm()));
+
+
+        List<Question> questions = parseTest(oldEntityPost, shooltestTest);
+        shooltestTest.setQuestions(questions);
+
+
+        shooltestTest.setRedirectUrl(oldEntityPost.getGuid());
+
+        shooltestTest.setOldEntityPost(oldEntityPost);
+
+        return shooltestTest;
+    }
+
+    public List<Question> parseTest(OldEntityPost oldEntityPost, ShooltestTest shooltestTest) {
+
+        String normalized = oldEntityPost.getPostContent();
+        normalized = normalized.replace('\u00A0', ' ');
+        normalized = normalized.replaceAll("[\u200B\uFEFF\u200E\u200F]", "");
+
+        normalized = normalized.replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "");
+
+
+        String[] lines = normalized.split("\\r?\\n");
+
+
+        Pattern questionPattern = Pattern.compile("^\\s*(\\d+)(?:[\\)\\.]?)\\s+(.+)$");
+
+
+        Pattern answerPattern = Pattern.compile("^\\s*([A-Za-zА-Яа-я0-9]+)(?:[\\)\\.]?)\\s+(.+)$");
+
+
+        List<Question> result = new ArrayList<>();
+
+
+        Question currentQuestion = null;
+        boolean inQuestion = false;
+        boolean questionDiscarded = false;
+
+
+        NewRubric rubric = getNewRubric(oldEntityPost.getTerm());
+
+        for (String rawLine : lines) {
+            String line = rawLine.trim();
+            if (line.isEmpty()) {
+
+                continue;
+            }
+
+            Matcher qMatcher = questionPattern.matcher(line);
+            Matcher aMatcher = answerPattern.matcher(line);
+
+            if (qMatcher.matches()) {
+
+
+                if (inQuestion && currentQuestion != null && !questionDiscarded) {
+                    finalizeAndAdd(currentQuestion, result);
+                }
+
+
+                currentQuestion = new Question();
+                currentQuestion.setQuestionText(qMatcher.group(2).trim());
+                currentQuestion.setRubric(rubric);
+                currentQuestion.setTest(shooltestTest);
+                currentQuestion.setAnswers(new ArrayList<>());
+
+                inQuestion = true;
+                questionDiscarded = false;
+
+            } else if (aMatcher.matches() && inQuestion && !questionDiscarded) {
+
+                String answerText = aMatcher.group(2).trim();
+                boolean isCorrect = false;
+
+
+                if (!answerText.isEmpty() && answerText.charAt(answerText.length() - 1) == '+') {
+                    isCorrect = true;
+
+                    answerText = answerText.substring(0, answerText.length() - 1).trim();
+                }
+
+
+                Answer answer = new Answer();
+                answer.setAnswerText(answerText);
+                answer.setCorrect(isCorrect);
+                answer.setQuestion(currentQuestion);
+
+                currentQuestion.getAnswers().add(answer);
+
+            } else {
+
+                if (inQuestion && !questionDiscarded) {
+                    System.out.println("Отклоняю текущий вопрос из-за некорректной строки: " + line);
+                }
+                questionDiscarded = true;
+                inQuestion = false;
+            }
+        }
+
+
+        if (inQuestion && currentQuestion != null && !questionDiscarded) {
+            finalizeAndAdd(currentQuestion, result);
+        }
+
+        return result;
+    }
+
+    /**
+     * Если у вопроса есть хотя бы один ответ и хотя бы один правильный - добавляем в result.
+     * Иначе - логируем и отбрасываем.
+     */
+    private void finalizeAndAdd(Question question, List<Question> result) {
+        if (question.getAnswers() == null || question.getAnswers().isEmpty()) {
+            System.out.println("Вопрос без ответов, пропускаем: " + question.getQuestionText());
+            return;
+        }
+        boolean hasCorrect = question.getAnswers().stream().anyMatch(Answer::isCorrect);
+        if (!hasCorrect) {
+            System.out.println("Вопрос без правильных ответов, пропускаем: " + question.getQuestionText());
+            return;
+        }
+
+        result.add(question);
+    }
+
+
+    private NewRubric getNewRubric(String term) {
+
+        return new NewRubric();
+    }
+
+
+    public void printAllTests(List<ShooltestTest> tests) {
+        for (int i = 0; i < tests.size(); i++) {
+            ShooltestTest test = tests.get(i);
+            System.out.println("=============================================");
+            System.out.println("Тест #" + (i + 1) + ": " + test.getName());
+            System.out.println("Рубрика: " + (test.getRubric() != null ? test.getRubric().getName() : "Не указана"));
+            System.out.println("=============================================\n");
+
+            List<Question> questions = test.getQuestions();
+            if (questions.isEmpty()) {
+                System.out.println("Нет вопросов в этом тесте.\n");
+                continue;
+            }
+
+            for (int j = 0; j < questions.size(); j++) {
+                Question q = questions.get(j);
+                System.out.println((j + 1) + ". " + q.getQuestionText());
+
+                for (int k = 0; k < q.getAnswers().size(); k++) {
+                    Answer a = q.getAnswers().get(k);
+                    String correctMark = a.isCorrect() ? "[✔]" : "[ ]";
+                    System.out.println("   " + (char) ('а' + k) + ") " + correctMark + " " + a.getAnswerText());
+                }
+                System.out.println();
+            }
+            counter++;
+        }
+    }
+
+
 }

@@ -1,10 +1,8 @@
 package org.example.shooltest.Entities;
 
-import jakarta.persistence.Entity;
+import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import jakarta.persistence.*;
-import lombok.ToString;
 
 import java.util.List;
 
@@ -20,13 +18,18 @@ public class ShooltestTest {
 
     @Column(nullable = false)
     private String name;
-    @Column
-    private String description;
 
     @OneToMany(mappedBy = "test", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Question> questions;
 
-    @ManyToOne(cascade = CascadeType.ALL)
+    @ManyToOne
     @JoinColumn(name = "rubric_id", nullable = false)
     private NewRubric rubric;
+
+    @Column
+    private String redirectUrl;
+
+    @JoinColumn(name = "oldPost_id")
+    @OneToOne
+    private OldEntityPost oldEntityPost;
 }
